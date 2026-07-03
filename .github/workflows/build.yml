@@ -1,0 +1,79 @@
+name: Build and Release Mobile App
+
+on:
+  push:
+    branches:
+      - main # یا هر شاخه‌ای که اسمش رو گذاشتی (توی عکس main هست)
+  workflow_dispatch: # برای اجرای دستی پایپ‌لاین
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ۱. استخراج فایل زیپ
+      - name: Unzip project files
+        run: |
+          if [ -f "mobile_app_example.zip" ]; then
+            unzip -o mobile_app_example.zip -d ./project-root
+            echo "Project unzipped successfully."
+          else
+            echo "Error: mobile_app_example.zip not found!" && exit 1
+          fi
+
+      # ۲. تنظیم جاوا (برای اندروید کاملاً ضروریه)
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'zulu'
+
+      # ۳. تشخیص نوع پروژه و بیلد آن (اندروید، گریدل یا نود جی‌اس)
+      - name: Build Application
+        run: |
+          cd project-root
+          
+          # اگر پروژه بر پایه اندروید/گریدل باشه:
+          if [ -f "gradlew" ]; then
+            chmod +x gradlew
+            ./gradlew assembleRelease
+            echo "BUILD_TYPE=gradle" >> $GITHUB_ENV
+            
+          # اگر پروژه ری‌اکت نیتو یا نود جی‌اس باشه و فایل package.json داشته باشه:
+          elif [ -f "package.json" ]; then
+            npm install
+            # اگر اسکریپت بیلد خاصی داری اینجا وارد کن، مثلاً:
+            # npm run build
+            echo "BUILD_TYPE=node" >> $GITHUB_ENV
+          else
+            echo "No standard build tool found. Zipping output directly."
+            echo "BUILD_TYPE=unknown" >> $GITHUB_ENV
+          fi
+
+      # ۴. جمع‌آوری فایل‌های خروجی برای آپلود
+      - name: Prepare Artifacts
+        run: |
+          mkdir -p ../output
+          # پیدا کردن فایل‌های APK تولید شده (اگر پروژه اندروید باشه)
+          find project-root -name "*.apk" -exec cp {} ../output/ \; || true
+          # اگر فایل APK نبود، کل پوشه پروژه رو دوباره پکیج می‌کنه
+          if [ -z "$(ls -A ../output)" ]; then
+            zip -r ../output/app-release.zip project-root
+          fi
+
+      # ۵. ساختن خودکار یک Release در گیت‌هاب و قرار دادن فایل خروجی برای دانلود
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Release v1.0.${{ github.run_number }}
+          draft: false
+          prerelease: false
+          files: |
+            output/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
